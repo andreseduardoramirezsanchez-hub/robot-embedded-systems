@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control Remoto Robot</title>
+  <style>
+    body {
+      background: #1a1a2e;
+      color: #fff;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .container {
+      background: #16213e;
+      padding: 20px;
+      border-radius: 15px;
+      box-shadow: 0 0 20px #e94560;
+      text-align: center;
+      max-width: 400px;
+      width: 90%;
+    }
+    h2 { color: #e94560; margin-top: 0; }
+    .panel {
+      margin: 15px 0;
+      padding: 10px;
+      background: #0f3460;
+      border-radius: 10px;
+    }
+    button {
+      padding: 12px;
+      margin: 5px;
+      border: none;
+      border-radius: 8px;
+      background: #e94560;
+      color: #fff;
+      font-weight: bold;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #c13545; }
+    button:active { transform: scale(0.95); }
+    .dir-buttons {
+      display: grid;
+      grid-template-areas:
+        ".    up    ."
+        "left stop right"
+        ".    down  .";
+      gap: 5px;
+      justify-content: center;
+    }
+    .dir-up { grid-area: up; }
+    .dir-left { grid-area: left; }
+    .dir-right { grid-area: right; }
+    .dir-down { grid-area: down; }
+    .dir-stop { grid-area: stop; }
+    select {
+      padding: 8px;
+      margin: 10px;
+      background: #0a0a1a;
+      color: #fff;
+      border: 1px solid #e94560;
+      border-radius: 5px;
+    }
+    .status-text {
+      font-size: 0.9rem;
+      margin: 5px 0;
+    }
+    .online { color: #4caf50; }
+    .offline { color: #e53935; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h2>🤖 Control Remoto</h2>
+
+  <!-- Conexión -->
+  <div class="panel">
+    <label>IP Broker</label>
+    <input id="ip" value="192.168.1.3" style="width:100%; margin:5px 0; padding:8px; background:#0a0a1a; color:#fff; border:1px solid #e94560; border-radius:5px;">
+    <label>Puerto WS</label>
+    <input id="port" value="5052" style="width:100%; margin:5px 0; padding:8px; background:#0a0a1a; color:#fff; border:1px solid #e94560; border-radius:5px;">
+    <label>Robot ID</label>
+    <input id="robotId" type="number" value="0" style="width:100%; margin:5px 0; padding:8px; background:#0a0a1a; color:#fff; border:1px solid #e94560; border-radius:5px;">
+    <button id="btnConnect">Conectar</button>
+    <button id="btnDisconnect" disabled>Desconectar</button>
+    <p id="connStatus" class="offline">Desconectado</p>
+  </div>
+
+  <!-- Carro -->
+  <div class="panel">
+    <h3>🚗 Carro</h3>
+    <select id="colorSelect">
+      <option value="col1">Color 1 (corto)</option>
+      <option value="col2" selected>Color 2 (medio)</option>
+      <option value="col3">Color 3 (largo)</option>
+    </select>
+    <div class="dir-buttons">
+      <button class="dir-up" onclick="sendCar('recto')">▲</button>
+      <button class="dir-left" onclick="sendCar('izquierda')">◀</button>
+      <button class="dir-stop" onclick="sendCar('stop')">■</button>
+      <button class="dir-right" onclick="sendCar('derecha')">▶</button>
+    </div>
+    <p>Estado carro: <span id="carState">-</span></p>
+  </div>
+
+  <!-- Brazo -->
+  <div class="panel">
+    <h3>🦾 Brazo</h3>
+    <button onclick="sendArm('inicio')">Posición Inicial</button>
+    <button onclick="sendArm('rombo')">Dibujar Rombo</button>
+    <button onclick="sendArm('stop')">Detener</button>
+    <p>Estado brazo: <span id="armState">-</span></p>
+  </div>
+</div>
+
+<script>
+  let ws = null;
+  const btnConnect = document.getElementById("btnConnect");
+  const btnDisconnect = document.getElementById("btnDisconnect");
+  const connStatus = document.getElementById("connStatus");
+  const carStateSpan = document.getElementById("carState");
+  const armStateSpan = document.getElementById("armState");
+
+  class PubSub {
+    constructor() { this.subs = {}; this.prefix = "UDFJC/emb1/robot0"; }
+    subscribe(pattern, cb) {
+      if (!this.subs[pattern]) this.subs[pattern] = [];
+      this.subs[pattern].push(cb);
+    }
+    publish(topic, message) {
+      for (const p in this.subs) {
+        if (this._match(p, topic)) this.subs[p].forEach(cb => cb(topic, message));
+      }
+    }
+    _match(pattern, topic) {
+      const p = pattern.split('/'), t = topic.split('/');
+      for (let i = 0; i < p.length; i++) {
+        if (p[i] === '#') return true;
+        if (p[i] === '+') { if (i >= t.length) return false; continue; }
+        if (i >= t.length || p[i] !== t[i]) return false;
+      }
+      return p.length === t.length;
+    }
+    pub(topic, data) {
+      this.publish(topic, data);
+      if (ws && ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ action: "PUB", topic, data }));
+    }
+    sub(topic, cb) {
+      this.subscribe(topic, cb);
+      if (ws && ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ action: "SUB", topic }));
+    }
+    pub_pre(suffix, data) {
+      this.pub(this.prefix + "/" + suffix, data);
+    }
+    sub_pre(suffix, cb) {
+      this.sub(this.prefix + "/" + suffix, cb);
+    }
+  }
+
+  const bus = new PubSub();
+  const robotIdInput = document.getElementById("robotId");
+  robotIdInput.addEventListener("input", () => {
+    bus.prefix = `UDFJC/emb1/robot${robotIdInput.value}`;
+  });
+
+  // Conexión
+  btnConnect.onclick = () => {
+    const url = `ws://${document.getElementById("ip").value}:${document.getElementById("port").value}/ws`;
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      connStatus.textContent = "Conectado";
+      connStatus.className = "online";
+      btnConnect.disabled = true;
+      btnDisconnect.disabled = false;
+      // Reenviar suscripciones
+      for (const p in bus.subs) {
+        ws.send(JSON.stringify({ action: "SUB", topic: p }));
+      }
+    };
+    ws.onclose = () => {
+      connStatus.textContent = "Desconectado";
+      connStatus.className = "offline";
+      btnConnect.disabled = false;
+      btnDisconnect.disabled = true;
+    };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.action === "PUB") bus.publish(msg.topic, msg.data);
+      } catch (e) {}
+    };
+  };
+  btnDisconnect.onclick = () => { if (ws) ws.close(); };
+
+  // Suscripciones a estados
+  bus.sub_pre("arm/state", (topic, data) => {
+    armStateSpan.textContent = data.busy ? "Ocupado" : `Ángulos: ${data.base}°/${data.hombro}°/${data.codo}°`;
+  });
+  bus.sub_pre("car/state", (topic, data) => {
+    carStateSpan.textContent = data.moving ? `Moviendo: ${data.direction}` : "Detenido";
+  });
+
+  // Funciones de envío
+  function sendCar(action) {
+    const col = document.getElementById("colorSelect").value;
+    bus.pub_pre("car/cmd", { action, col });
+  }
+  function sendArm(action) {
+    if (action === "inicio") bus.pub_pre("arm/cmd", { action: "inicio" });
+    else if (action === "rombo") bus.pub_pre("arm/cmd", { action: "rombo", size: 20 });
+    // stop no está implementado en el brazo, pero podrías añadirlo
+  }
+</script>
+</body>
+</html>
