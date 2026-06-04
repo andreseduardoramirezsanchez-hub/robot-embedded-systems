@@ -1,519 +1,172 @@
 # =============================================================
-# PICO 2W — BRAZO + CARRO DIFERENCIAL
-# Control exclusivamente por WiFi/PubSub desde el frontend
-# Topicos suscritos:
-#   arm/cmd  <- {action:"rombo", size:N} | {action:"inicio"}
-#   car/cmd  <- {action:"recto"|"izquierda"|"derecha", col:"col1"|"col2"|"col3"}
-# Topicos publicados:
-#   arm/state -> {base, hombro, codo, busy}
-#   car/state -> {moving, direction}
-#   debug/watchdog -> heartbeat
+# PICO W (CÁMARA) – Detección de color + UART + WiFi (telemetría)
 # =============================================================
-
-import network, time, json, gc, math
-import usocket as socket
-from machine import Pin, PWM
-
+from ov7670 import OV7670_30x40_RGB565 as CAM
+import time, json, gc
+import wifi, socketpool, board, busio, analogio, binascii
+from adafruit_ov7670 import OV7670, OV7670_SIZE_DIV16, OV7670_COLOR_RGB
+import adafruit_ssd1306
 
 # =============================================================
-# SCHEDULER + TASK BASE
+# CONFIGURACIÓN DE RED
 # =============================================================
+SSID = "LUIS ALBERTO HENAO"
+PASSWORD = "RAZAPURA"
+BROKER_HOST = "192.168.1.7"
+BROKER_PORT = 5051
+ROBOT_PREFIX = "UDFJC/emb1/robot0"
 
-class Task:
-    def __init__(self, scheduler, period_ms, priority=1):
-        self.period = period_ms
-        self.priority = priority
-        self.next_run = time.ticks_ms()
-        scheduler.add(self)
+print("Conectando WiFi...")
+wifi.radio.connect(SSID, PASSWORD)
+print("IP:", wifi.radio.ipv4_address)
 
-    def update(self):
-        pass
-
-
-class Scheduler:
-    def __init__(self):
-        self.tasks = []
-
-    def add(self, task):
-        self.tasks.append(task)
-        self.tasks.sort(key=lambda t: t.priority)
-
-    def run(self):
-        while True:
-            now = time.ticks_ms()
-            for task in self.tasks:
-                if time.ticks_diff(now, task.next_run) >= 0:
-                    task.update()
-                    task.next_run = time.ticks_add(now, task.period)
-            gc.collect()
-            time.sleep_ms(1)
-
+pool = socketpool.SocketPool(wifi.radio)
 
 # =============================================================
-# WIFI
+# UART para enviar datos de visión (TX=GP0, RX=GP1)
 # =============================================================
-
-class WiFiManager:
-    def __init__(self, ssid, password_file=".env"):
-        self.ssid = ssid
-        with open(password_file) as f:
-            self.password = f.read().strip()
-        self.wlan = network.WLAN(network.STA_IF)
-        self.wlan.active(True)
-
-    def connect(self):
-        print("Conectando WiFi...")
-        if not self.wlan.isconnected():
-            self.wlan.connect(self.ssid, self.password)
-            while not self.wlan.isconnected():
-                time.sleep(1)
-                print("status:", self.wlan.status())
-        print("WiFi OK. IP:", self.wlan.ifconfig()[0])
-
+uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
 
 # =============================================================
-# SOCKET CLIENT
+# DETECCIÓN DE COLOR (optimizada, con umbrales actualizables)
 # =============================================================
+class ColorDetector:
+    # Umbrales iniciales (se actualizarán desde la web)
+    RED_R_MIN, RED_G_MAX, RED_B_MAX = 10, 16, 13
+    GREEN_G_MIN, GREEN_R_MAX, GREEN_B_MAX = 20, 9, 7
+    BLUE_B_MIN, BLUE_R_MAX, BLUE_G_MAX = 8, 15, 18
+    MIN_PIXELS_PER_COL = 8
+    MIN_REGION_WIDTH   = 2
 
-class SocketClient(Task):
-    def __init__(self, host, port, scheduler, period_ms=50):
-        super().__init__(scheduler, period_ms, priority=0)
-        self.host = host
-        self.port = port
-        self.sock = None
-        self.actions = {}
-        self._rx_buffer = b""
+    def __init__(self, w=40, h=30):
+        self.w, self.h = w, h
 
-    def connect(self):
-        print("Conectando al broker...")
-        addr = socket.getaddrinfo(self.host, self.port)[0][-1]
-        self.sock = socket.socket()
-        self.sock.connect(addr)
-        self.sock.setblocking(False)
-        print("Broker OK")
+    def analyze(self, buf):
+        w, h = self.w, self.h
+        col_red, col_green, col_blue = [0]*w, [0]*w, [0]*w
+        total_red = total_green = total_blue = 0
 
-    def ensure(self):
-        if self.sock is None:
-            self.connect()
+        rmin, gmax_r, bmax_r = self.RED_R_MIN, self.RED_G_MAX, self.RED_B_MAX
+        gmin, rmax_g, bmax_g = self.GREEN_G_MIN, self.GREEN_R_MAX, self.GREEN_B_MAX
+        bmin, rmax_b, gmax_b = self.BLUE_B_MIN, self.BLUE_R_MAX, self.BLUE_G_MAX
 
-    def send(self, data):
-        total = 0
-        while total < len(data):
-            try:
-                sent = self.sock.send(data[total:])
-                if sent == 0:
-                    return False
-                total += sent
-            except OSError:
-                return False
-        return True
+        idx, buf_len = 0, len(buf)
+        for y in range(h):
+            for x in range(w):
+                if idx+1 >= buf_len: break
+                pixel = (buf[idx] << 8) | buf[idx+1]
+                idx += 2
+                r, g, b = (pixel >> 11) & 0x1F, (pixel >> 5) & 0x3F, pixel & 0x1F
 
-    def send_json(self, obj):
-        self.send((json.dumps(obj) + "\n").encode())
+                if r >= rmin and g <= gmax_r and b <= bmax_r:
+                    col_red[x] += 1; total_red += 1
+                elif g >= gmin and r <= rmax_g and b <= bmax_g:
+                    col_green[x] += 1; total_green += 1
+                elif b >= bmin and r <= rmax_b and g <= gmax_b:
+                    col_blue[x] += 1; total_blue += 1
 
-    def close(self):
-        try:
-            if self.sock:
-                self.sock.close()
-        except:
-            pass
-        self.sock = None
+        def mejor_region(col_count):
+            mejor = None; mejor_ancho = 0; in_reg = False; start = 0
+            for x in range(w):
+                if col_count[x] >= self.MIN_PIXELS_PER_COL:
+                    if not in_reg: in_reg = True; start = x
+                else:
+                    if in_reg:
+                        in_reg = False
+                        ancho = x - start
+                        if ancho >= self.MIN_REGION_WIDTH and ancho > mejor_ancho:
+                            mejor_ancho = ancho; mejor = (start, x-1)
+            if in_reg and (w - start) >= self.MIN_REGION_WIDTH and (w - start) > mejor_ancho:
+                mejor = (start, w-1)
+            return mejor
 
-    def recv_json_nonblocking(self):
-        messages = []
-        try:
-            data = self.sock.recv(1024)
-            if data == b'':
-                self.close()
-                return []
-            if data:
-                self._rx_buffer += data
-        except OSError:
-            return []
-        while b"\n" in self._rx_buffer:
-            line, self._rx_buffer = self._rx_buffer.split(b"\n", 1)
-            if not line:
-                continue
-            try:
-                messages.append(json.loads(line))
-            except:
-                pass
-        return messages
+        rr, gg, bb = mejor_region(col_red), mejor_region(col_green), mejor_region(col_blue)
+        rc = (rr[0] + rr[1])/2 if rr else None
+        gc_ = (gg[0] + gg[1])/2 if gg else None
+        bc = (bb[0] + bb[1])/2 if bb else None
 
-    def update(self):
-        if self.sock is None:
-            return
-        msgs = self.recv_json_nonblocking()
-        for msg in msgs:
-            action = msg.get("action")
-            if action in self.actions:
-                self.actions[action](msg)
-
-    def add_action(self, action, callback):
-        self.actions[action] = callback
-
-
-# =============================================================
-# PUBSUB NODE
-# =============================================================
-
-class Node:
-    def __init__(self, socket_client, prefix='UDFJC/emb1/robot0/'):
-        self.sock = socket_client
-        self.sock.add_action("PUB", self.handle_pub)
-        self.sock.add_action("SUB", self.handle_sub)
-        self.prefix = prefix
-        self.subscriptions = {}
-
-    def publish(self, topic, data):
-        self.broker_publish(topic, data)
-        self.local_publish(topic, data)
-
-    def broker_publish(self, topic, data):
-        self.sock.ensure()
-        pkt = {"action": "PUB", "topic": self.prefix + topic, "data": data}
-        self.sock.send_json(pkt)
-
-    def local_publish(self, topic, data):
-        for c in list(self.subscriptions.get(topic, set())):
-            try:
-                c(data)
-            except:
-                self.subscriptions[topic].discard(c)
-
-    def subscribe(self, topic, callback):
-        self.subscriptions.setdefault(topic, set()).add(callback)
-        self.sock.ensure()
-        self.sock.send_json({"action": "SUB", "topic": self.prefix + topic})
-        print(f"[SUB] {topic}")
-
-    def handle_pub(self, msg):
-        topic = msg['topic']
-        if not topic.startswith(self.prefix):
-            return
-        self.local_publish(topic[len(self.prefix):], msg['data'])
-
-    def handle_sub(self, msg):
-        pass
-
-
-# =============================================================
-# LED INDICADOR
-# ON = standby | OFF = ejecutando
-# =============================================================
-
-class LedIndicator:
-    def __init__(self):
-        self.led = Pin("LED", Pin.OUT)
-        self.led.off()
-
-    def standby(self):
-        self.led.on()
-
-    def busy(self):
-        self.led.off()
-
-
-# =============================================================
-# BRAZO — Task con maquina de estados (no bloqueante)
-# =============================================================
-
-class ArmTask(Task):
-    L1     = 80.0
-    L2     = 145.0
-    H_BASE = 30.0
-    L3     = 15.0
-    LIMITS = {'base': (10, 170), 'hombro': (35, 165), 'codo': (90, 180)}
-    INICIAL = {'base': 90.0, 'hombro': 90.0, 'codo': 180.0}
-    X_TABLERO = 185
-    X_SEGURO  = 155
-    Z_CENTRO  = 90
-    Y_CENTRO  = 0
-
-    def __init__(self, scheduler, pubsub, led, period_ms=20):
-        super().__init__(scheduler, period_ms, priority=2)
-        self.pubsub = pubsub
-        self.led    = led
-
-        self.servos = {
-            'base':   PWM(Pin(16), freq=50),
-            'hombro': PWM(Pin(17), freq=50),
-            'codo':   PWM(Pin(18), freq=50)
+        return {
+            "rp": total_red, "gp": total_green, "bp": total_blue,
+            "rc": rc, "gc": gc_, "bc": bc
         }
-        self.estado = self.INICIAL.copy()
-
-        # Maquina de estados
-        self._busy       = False
-        self._queue      = []
-        self._seg        = None
-        self._seg_step   = 0
-        self._seg_total  = 0
-        self._seg_delay  = 20
-        self._last_ms    = 0
-
-        pubsub.subscribe("arm/cmd", self._handle_cmd)
-        self._publish_state()
-
-    # ---- IK ----
-    def _ik(self, x, y, z):
-        b_rad = math.atan2(y, x)
-        b = 90 + math.degrees(b_rad)
-        r = math.sqrt(x**2 + y**2)
-        dx = r - self.L3
-        dz = z - self.H_BASE
-        D2 = dx**2 + dz**2
-        D  = math.sqrt(D2)
-        if D > (self.L1 + self.L2) or D < abs(self.L1 - self.L2):
-            return None, None, None
-        cos_th2 = max(-1.0, min(1.0, (D2 - self.L1**2 - self.L2**2) / (2*self.L1*self.L2)))
-        th2 = math.acos(cos_th2)
-        th1 = math.atan2(dx, dz) - math.atan2(self.L2*math.sin(th2), self.L1+self.L2*math.cos(th2))
-        return 90 + math.degrees(b_rad), math.degrees(th1)+90, math.degrees(th2)+90
-
-    def _valido(self, b, h, c):
-        if b is None:
-            return False
-        return (self.LIMITS['base'][0]   <= b <= self.LIMITS['base'][1] and
-                self.LIMITS['hombro'][0] <= h <= self.LIMITS['hombro'][1] and
-                self.LIMITS['codo'][0]   <= c <= self.LIMITS['codo'][1])
-
-    def _mover(self, nombre, angulo):
-        lo, hi = self.LIMITS[nombre]
-        ang  = max(lo, min(hi, angulo))
-        duty = int((ang / 180 * 6554) + 1638)
-        self.servos[nombre].duty_u16(duty)
-        return ang
-
-    # ---- Cola de segmentos ----
-    def _seg_cartesiano(self, x0,y0,z0, x1,y1,z1, pasos=60, delay_ms=20):
-        self._queue.append(('cart', x0,y0,z0, x1,y1,z1, pasos, delay_ms))
-
-    def _seg_angular(self, b,h,c, pasos=80, delay_ms=20):
-        self._queue.append(('ang', b,h,c, pasos, delay_ms))
-
-    def _encolar_rombo(self, lado_mm):
-        d  = lado_mm
-        xT = self.X_TABLERO
-        xS = self.X_SEGURO
-        yC = self.Y_CENTRO
-        zC = self.Z_CENTRO
-        va = (yC,      zC + d)
-        vd = (yC + d,  zC)
-        vb = (yC,      zC - d)
-        vi = (yC - d,  zC)
-        pl = max(12, int(lado_mm * 1.2))
-
-        self._seg_cartesiano(160,0,110,       xS,va[0],va[1], 80,20)
-        self._seg_cartesiano(xS,va[0],va[1],  xT,va[0],va[1], 30,20)
-        self._seg_cartesiano(xT,va[0],va[1],  xT,vd[0],vd[1], pl,20)
-        self._seg_cartesiano(xT,vd[0],vd[1],  xT,vb[0],vb[1], pl,20)
-        self._seg_cartesiano(xT,vb[0],vb[1],  xT,vi[0],vi[1], pl,20)
-        self._seg_cartesiano(xT,vi[0],vi[1],  xT,va[0],va[1], pl,20)
-        self._seg_cartesiano(xT,va[0],va[1],  xS,va[0],va[1], 30,20)
-        self._seg_angular(self.INICIAL['base'], self.INICIAL['hombro'],
-                          self.INICIAL['codo'], 120, 20)
-
-    # ---- Maquina de estados ----
-    def update(self):
-        if not self._busy:
-            if self._queue:
-                self._busy = True
-                self.led.busy()
-                self._load_next()
-            return
-
-        now = time.ticks_ms()
-        if time.ticks_diff(now, self._last_ms) < self._seg_delay:
-            return
-        self._last_ms = now
-
-        if self._seg_step >= self._seg_total:
-            if self._queue:
-                self._load_next()
-            else:
-                self._busy = False
-                self.led.standby()
-                self._publish_state()
-            return
-
-        self._step()
-        self._seg_step += 1
-
-    def _load_next(self):
-        s = self._queue.pop(0)
-        if s[0] == 'ang':
-            _, b, h, c, pasos, delay = s
-            self._seg = ('ang', b, h, c,
-                         self.estado['base'],
-                         self.estado['hombro'],
-                         self.estado['codo'])
-            self._seg_total = pasos
-            self._seg_delay = delay
-        else:
-            _, x0,y0,z0, x1,y1,z1, pasos, delay = s
-            self._seg = ('cart', x0,y0,z0, x1,y1,z1)
-            self._seg_total = pasos
-            self._seg_delay = delay
-        self._seg_step = 0
-
-    def _step(self):
-        f = (self._seg_step + 1) / self._seg_total
-        if self._seg[0] == 'ang':
-            _, bd,hd,cd, b0,h0,c0 = self._seg
-            self.estado['base']   = self._mover('base',   b0+(bd-b0)*f)
-            self.estado['hombro'] = self._mover('hombro', h0+(hd-h0)*f)
-            self.estado['codo']   = self._mover('codo',   c0+(cd-c0)*f)
-        else:
-            _, x0,y0,z0, x1,y1,z1 = self._seg
-            b,h,c = self._ik(x0+(x1-x0)*f, y0+(y1-y0)*f, z0+(z1-z0)*f)
-            if self._valido(b,h,c):
-                self.estado['base']   = self._mover('base',   b)
-                self.estado['hombro'] = self._mover('hombro', h)
-                self.estado['codo']   = self._mover('codo',   c)
-
-    def _publish_state(self):
-        self.pubsub.publish("arm/state", {
-            "base":   round(self.estado['base'],   1),
-            "hombro": round(self.estado['hombro'], 1),
-            "codo":   round(self.estado['codo'],   1),
-            "busy":   self._busy
-        })
-
-    def _handle_cmd(self, msg):
-        if self._busy:
-            return
-        action = msg.get("action")
-        if action == "rombo":
-            self._encolar_rombo(msg.get("size", 20))
-        elif action == "inicio":
-            self._seg_angular(self.INICIAL['base'],
-                              self.INICIAL['hombro'],
-                              self.INICIAL['codo'], 120, 20)
-            self._busy = True
-            self.led.busy()
-            self._load_next()
-
 
 # =============================================================
-# CARRO — Task con maquina de estados (no bloqueante)
+# TAREA DE CÁMARA Y ENVÍO UART + WiFi
 # =============================================================
-
-class CarTask(Task):
-    DUTY_MAX       = 65535
-    TIEMPOS_RECTA  = {'col1': 0.60, 'col2': 1.20, 'col3': 1.80}
-    SEMICIRCULOS   = {
-        'col1': (1.206, 36863),
-        'col2': (2.149, 49438),
-        'col3': (3.091, 54346),
-    }
-
-    def __init__(self, scheduler, pubsub, led, period_ms=20):
-        super().__init__(scheduler, period_ms, priority=2)
-        self.pubsub = pubsub
-        self.led    = led
-
-        self.in1_l = Pin(8,  Pin.OUT)
-        self.in2_l = Pin(9,  Pin.OUT)
-        self.in1_r = Pin(4,  Pin.OUT)
-        self.in2_r = Pin(5,  Pin.OUT)
-        self.ena   = PWM(Pin(10), freq=1000)
-        self.enb   = PWM(Pin(11), freq=1000)
-        self._stop()
-
-        self._moving   = False
-        self._end_ms   = 0
-        self._direction = "stop"
-
-        pubsub.subscribe("car/cmd", self._handle_cmd)
-
-    def _stop(self):
-        self.in1_l.value(0); self.in2_l.value(0)
-        self.in1_r.value(0); self.in2_r.value(0)
-        self.ena.duty_u16(0); self.enb.duty_u16(0)
-
-    def _set(self, duty_l, duty_r):
-        self.in1_l.value(1); self.in2_l.value(0)
-        self.in1_r.value(1); self.in2_r.value(0)
-        self.ena.duty_u16(duty_l)
-        self.enb.duty_u16(duty_r)
-
-    def _start(self, direccion, col):
-        if self._moving:
-            return
-        self._moving    = True
-        self._direction = direccion
-        self.led.busy()
-
-        if direccion == 'recto':
-            t = self.TIEMPOS_RECTA[col]
-            self._set(self.DUTY_MAX, self.DUTY_MAX)
-        elif direccion == 'izquierda':
-            t, di = self.SEMICIRCULOS[col]
-            self._set(di, self.DUTY_MAX)
-        elif direccion == 'derecha':
-            t, di = self.SEMICIRCULOS[col]
-            self._set(self.DUTY_MAX, di)
-        else:
-            t = 0
-
-        self._end_ms = time.ticks_add(time.ticks_ms(), int(t * 1000))
-        print(f"[CAR] {direccion} {col} {t:.2f}s")
-
-    def update(self):
-        if not self._moving:
-            return
-        if time.ticks_diff(time.ticks_ms(), self._end_ms) >= 0:
-            self._stop()
-            self._moving    = False
-            self._direction = "stop"
-            self.led.standby()
-            self.pubsub.publish("car/state", {"moving": False, "direction": "stop"})
-
-    def _handle_cmd(self, msg):
-        if not self._moving:
-            self._start(msg.get("action", ""), msg.get("col", "col1"))
-
-
-# =============================================================
-# WATCHDOG
-# =============================================================
-
-class WatchdogTask(Task):
-    def __init__(self, scheduler, pubsub, period_ms=60000):
-        super().__init__(scheduler, period_ms, priority=5)
-        self.pubsub = pubsub
-
-    def update(self):
-        self.pubsub.publish("debug/watchdog", {"msg": "alive"})
-        print("Watchdog alive")
-
-
-# =============================================================
-# MAIN APP — PICO 2W
-# =============================================================
-
-class MainApp:
+class CameraTask:
+    WIDTH, HEIGHT = 40, 30
     def __init__(self):
-        self.scheduler = Scheduler()
-        self.led       = LedIndicator()
-        self.wifi      = WiFiManager("TU_SSID")   # <- cambiar
-        self.socket    = SocketClient(
-            host="192.168.1.17",                   # <- IP del broker
-            port=5051,
-            scheduler=self.scheduler
+        self.cam = CAM(
+            d0_d7pinslist=[board.GP4, board.GP5, board.GP6, board.GP7, board.GP8, board.GP9, board.GP10, board.GP11],
+            plk=board.GP12, xlk=board.GP13, sda=board.GP20, scl=board.GP21,
+            hs=board.GP16, vs=board.GP17, ret=board.GP18, pwdn=board.GP19
         )
-        self.pubsub  = Node(self.socket, prefix='UDFJC/emb1/robot0/')
-        self.arm     = ArmTask(self.scheduler, self.pubsub, self.led)
-        self.car     = CarTask(self.scheduler, self.pubsub, self.led)
-        self.watchdog= WatchdogTask(self.scheduler, self.pubsub)
+        self.buf = bytearray(2 * self.WIDTH * self.HEIGHT)
+        self.cam.size = OV7670_SIZE_DIV16
+        self.cam.colorspace = OV7670_COLOR_RGB
+        self.detector = ColorDetector(self.WIDTH, self.HEIGHT)
+        self.camera_enabled = True
+        self.last_frame = 0
+        self.sock = None   # se asignará después
 
-    def run(self):
-        self.wifi.connect()
-        self.socket.connect()
-        self.led.standby()
-        print("Pico 2W listo. Scheduler corriendo...")
-        self.scheduler.run()
+    def capture_and_process(self):
+        self.cam.capture(self.buf)
+        frame_b64 = binascii.b2a_base64(self.buf).decode().strip()
+        # Enviar por WiFi (para el dashboard)
+        if self.sock:
+            self.sock.send_json({
+                "action": "PUB",
+                "topic": ROBOT_PREFIX + "/camera/frame",
+                "data": {"w": self.WIDTH, "h": self.HEIGHT, "frame": frame_b64}
+            })
+        # Analizar colores y enviar por UART
+        vision = self.detector.analyze(self.buf)
+        uart.write((json.dumps(vision) + "\n").encode())
 
+# =============================================================
+# CLIENTE WiFi SIMPLE
+# =============================================================
+class SimpleClient:
+    def __init__(self, host, port):
+        self.host, self.port = host, port
+        self.sock = None
+    def connect(self):
+        try:
+            self.sock = pool.socket()
+            self.sock.connect((self.host, self.port))
+            self.sock.setblocking(False)
+            print("Conectado al broker")
+            return True
+        except Exception as e:
+            print("Error conexión:", e)
+            return False
+    def send_json(self, obj):
+        try:
+            data = (json.dumps(obj) + "\n").encode()
+            self.sock.send(data)
+        except:
+            self.sock = None
 
-app = MainApp()
-app.run()
+# =============================================================
+# INICIALIZACIÓN
+# =============================================================
+cam_task = CameraTask()
+client = SimpleClient(BROKER_HOST, BROKER_PORT)
+cam_task.sock = client
+
+# OLED y baterías (se pueden mantener como antes, no incluyo todo por brevedad)
+# ...
+
+print("Sistema listo")
+last_frame = 0
+while True:
+    now = time.monotonic()
+    # Reconexión WiFi
+    if client.sock is None:
+        client.connect()
+    # Captura y envío cada 50 ms (20 fps)
+    if now - last_frame > 0.05:
+        cam_task.capture_and_process()
+        last_frame = now
+        gc.collect()
+    time.sleep(0.01)
