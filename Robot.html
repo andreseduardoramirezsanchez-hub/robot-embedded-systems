@@ -3,55 +3,70 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Control Remoto Robot</title>
+  <title>Robot Dashboard – Calibración y Monitoreo</title>
   <style>
     body {
-      background: #1a1a2e;
-      color: #fff;
-      font-family: 'Segoe UI', sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      margin: 0;
+      margin: 0; padding: 8px; background: #0a0a1a; color: #ccc;
+      font-family: 'Segoe UI', sans-serif; display: flex;
+      justify-content: center; height: 100vh; box-sizing: border-box;
     }
-    .container {
-      background: #16213e;
-      padding: 20px;
-      border-radius: 15px;
-      box-shadow: 0 0 20px #e94560;
-      text-align: center;
-      max-width: 400px;
-      width: 90%;
+    .main-grid {
+      display: grid; grid-template-columns: 1fr 300px;
+      grid-template-rows: auto 1fr auto; gap: 8px;
+      width: 100%; max-width: 1300px; height: 100%;
     }
-    h2 { color: #e94560; margin-top: 0; }
-    .panel {
-      margin: 15px 0;
-      padding: 10px;
-      background: #0f3460;
-      border-radius: 10px;
+    .top-panel {
+      grid-row: 1; grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
+      flex-wrap: wrap;
     }
-    button {
-      padding: 12px;
-      margin: 5px;
-      border: none;
-      border-radius: 8px;
-      background: #e94560;
-      color: #fff;
-      font-weight: bold;
-      font-size: 1rem;
-      cursor: pointer;
-      transition: background 0.2s;
+    .camera-panel {
+      grid-row: 2; grid-column: 1; display: flex; flex-direction: column; gap: 5px;
     }
-    button:hover { background: #c13545; }
-    button:active { transform: scale(0.95); }
+    .control-panel {
+      grid-row: 2; grid-column: 2; display: flex; flex-direction: column; gap: 8px;
+      overflow-y: auto; padding-right: 4px;
+    }
+    .gemelo-panel {
+      grid-row: 3; grid-column: 1 / -1; height: 240px; min-height: 240px;
+      border: 1px solid #444; background: #111; position: relative; overflow: hidden;
+    }
+    .card {
+      background: #111625; border: 1px solid #223; border-radius: 6px; padding: 10px;
+    }
+    h3 { margin: 0 0 8px 0; font-size: 0.9rem; color: #fff; text-transform: uppercase; letter-spacing: 0.5px; }
+    .net-input {
+      background: #1a1f2c; border: 1px solid #334; color: #fff; padding: 6px; border-radius: 4px; font-size: 0.85rem;
+    }
+    .status-dot {
+      width: 12px; height: 12px; border-radius: 50%; background: #ff3333; display: inline-block;
+    }
+    .video-container {
+      position: relative; flex: 1; background: #000; border: 1px solid #334;
+      border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden;
+      min-height: 300px;
+    }
+    .video-container canvas {
+      width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;
+    }
+    .led-bar {
+      display: flex; height: 20px; background: #050510; border: 1px solid #223; border-radius: 4px; gap: 2px; padding: 2px;
+      margin-top: 6px;
+    }
+    .slider-container { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+    .slider-container label { font-size: 0.75rem; color: #aaa; display: flex; justify-content: space-between; }
+    .slider-container input { width: 100%; height: 4px; background: #334; accent-color: #0f0; }
+    .btn {
+      background: #223; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: #334; transform: scale(1.02); }
     .dir-buttons {
       display: grid;
       grid-template-areas:
         ".    up    ."
         "left stop right"
         ".    down  .";
-      gap: 5px;
+      gap: 4px;
       justify-content: center;
     }
     .dir-up { grid-area: up; }
@@ -59,165 +74,832 @@
     .dir-right { grid-area: right; }
     .dir-down { grid-area: down; }
     .dir-stop { grid-area: stop; }
-    select {
-      padding: 8px;
-      margin: 10px;
-      background: #0a0a1a;
-      color: #fff;
-      border: 1px solid #e94560;
-      border-radius: 5px;
+    .switch-container { display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; margin-bottom: 6px;}
+    .stats-panel {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 8px;
+      font-size: 0.7rem; background: #0a0a10; padding: 6px; border-radius: 4px;
     }
-    .status-text {
-      font-size: 0.9rem;
-      margin: 5px 0;
+    .color-stat {
+      display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 4px;
     }
-    .online { color: #4caf50; }
-    .offline { color: #e53935; }
+    .range-group {
+      border-left: 2px solid #334; padding-left: 8px; margin-top: 6px;
+    }
+    .range-group label { font-size: 0.7rem; color: #889; }
+    .gemelo-controls {
+      position: absolute; top: 5px; left: 5px; background: rgba(0,0,0,0.7); padding: 5px 8px;
+      border-radius: 4px; display: flex; gap: 10px; font-size: 0.7rem; z-index: 5;
+    }
+    .gemelo-controls label { color: #aaa; }
+    .gemelo-controls input { width: 80px; background: #222; border: 1px solid #555; color: #fff; padding: 2px 4px; border-radius: 3px; }
+    .orientation-panel {
+      display: flex; justify-content: space-around; align-items: center; margin-top: 8px;
+      background: #0a0a10; border: 1px solid #223; border-radius: 6px; padding: 8px;
+    }
+    .direction-indicator {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      font-size: 0.85rem; min-width: 70px;
+    }
+    .arrow {
+      font-size: 2rem; line-height: 1;
+    }
+    .memory-text {
+      font-size: 0.65rem; color: #888; min-height: 1em;
+    }
+    .color-red .arrow { color: #ff4444; }
+    .color-green .arrow { color: #44ff44; }
+    .color-blue .arrow { color: #4488ff; }
+    .guidance-status {
+      background: #050510; border: 1px solid #223; padding: 8px; margin-top: 8px; border-radius: 4px;
+      font-size: 0.8rem; text-align: center;
+    }
+    .guidance-status .state { font-weight: bold; color: #0ff; }
   </style>
 </head>
 <body>
-<div class="container">
-  <h2>🤖 Control Remoto</h2>
 
-  <!-- Conexión -->
-  <div class="panel">
-    <label>IP Broker</label>
-    <input id="ip" value="192.168.1.3" style="width:100%; margin:5px 0; padding:8px; background:#0a0a1a; color:#fff; border:1px solid #e94560; border-radius:5px;">
-    <label>Puerto WS</label>
-    <input id="port" value="5052" style="width:100%; margin:5px 0; padding:8px; background:#0a0a1a; color:#fff; border:1px solid #e94560; border-radius:5px;">
-    <label>Robot ID</label>
-    <input id="robotId" type="number" value="0" style="width:100%; margin:5px 0; padding:8px; background:#0a0a1a; color:#fff; border:1px solid #e94560; border-radius:5px;">
-    <button id="btnConnect">Conectar</button>
-    <button id="btnDisconnect" disabled>Desconectar</button>
-    <p id="connStatus" class="offline">Desconectado</p>
-  </div>
-
-  <!-- Carro -->
-  <div class="panel">
-    <h3>🚗 Carro</h3>
-    <select id="colorSelect">
-      <option value="col1">Color 1 (corto)</option>
-      <option value="col2" selected>Color 2 (medio)</option>
-      <option value="col3">Color 3 (largo)</option>
-    </select>
-    <div class="dir-buttons">
-      <button class="dir-up" onclick="sendCar('recto')">▲</button>
-      <button class="dir-left" onclick="sendCar('izquierda')">◀</button>
-      <button class="dir-stop" onclick="sendCar('stop')">■</button>
-      <button class="dir-right" onclick="sendCar('derecha')">▶</button>
+  <div class="main-grid">
+    
+    <div class="top-panel card">
+      <span class="status-dot" id="netStatusDot"></span>
+      <span id="netStatusText" style="font-size:0.85rem; font-weight:bold; min-width:100px;">Desconectado</span>
+      <label style="font-size:0.85rem;">Broker IP:</label>
+      <input type="text" id="txtHost" class="net-input" value="192.168.1.7" style="width:120px;">
+      <label style="font-size:0.85rem;">Puerto:</label>
+      <input type="text" id="txtPort" class="net-input" value="5052" style="width:60px;">
+      <button class="btn" id="btnConnect" onclick="toggleConnect()" style="background:#1a4d1a;">Conectar</button>
     </div>
-    <p>Estado carro: <span id="carState">-</span></p>
+    
+    <div class="camera-panel card">
+      <h3>Visión de la Cámara (OV7670) - Rangos HSV</h3>
+      <div class="video-container">
+        <canvas id="camCanvas"></canvas>
+      </div>
+      <div class="led-bar" id="ledsContainer"></div>
+      <div class="orientation-panel" id="orientationPanel">
+        <div class="direction-indicator color-red" id="indicatorRed">
+          <div class="arrow" id="arrowRed">?</div>
+          <div>Rojo</div>
+          <div class="memory-text" id="memRed"></div>
+        </div>
+        <div class="direction-indicator color-green" id="indicatorGreen">
+          <div class="arrow" id="arrowGreen">?</div>
+          <div>Verde</div>
+          <div class="memory-text" id="memGreen"></div>
+        </div>
+        <div class="direction-indicator color-blue" id="indicatorBlue">
+          <div class="arrow" id="arrowBlue">?</div>
+          <div>Azul</div>
+          <div class="memory-text" id="memBlue"></div>
+        </div>
+      </div>
+      <div class="guidance-status" id="guidanceStatus">
+        Estado guiado: <span class="state" id="stateText">Inactivo</span>
+      </div>
+      <div class="stats-panel" id="statsPanel">
+        <div><span class="color-stat" style="background:#ff0000;"></span> Rojo: <span id="redPercent">0</span>%</div>
+        <div><span class="color-stat" style="background:#00ff00;"></span> Verde: <span id="greenPercent">0</span>%</div>
+        <div><span class="color-stat" style="background:#0088ff;"></span> Azul: <span id="bluePercent">0</span>%</div>
+        <div>🔍 Detectando: <span id="detectedColor">Ninguno</span></div>
+        <div style="grid-column: 1 / -1;">🔵 Distancia azul: <span id="distBlue">-- cm</span></div>
+      </div>
+    </div>
+
+    <div class="control-panel">
+      
+      <!-- Calibración HSV -->
+      <div class="card">
+        <h3>Calibración de color (Rangos HSV)</h3>
+        <div class="switch-container">
+          <label for="chkDebug">🎨 Modo Depuración</label>
+          <input type="checkbox" id="chkDebug" checked>
+        </div>
+
+        <!-- ROJO -->
+        <div style="color:#ff6666; margin-top:6px;">🔴 ROJO</div>
+        <div class="range-group">
+          <div class="slider-container">
+            <label>Hue min <span id="redHueMinVal">0</span>° | Hue max <span id="redHueMaxVal">10</span>°</label>
+            <div style="display:flex; gap:8px;">
+              <input type="range" id="redHueMin" min="0" max="180" value="0" style="flex:1;">
+              <input type="range" id="redHueMax" min="0" max="180" value="10" style="flex:1;">
+            </div>
+          </div>
+          <div class="slider-container">
+            <label>Sat min <span id="redSatMinVal">40</span>%</label>
+            <input type="range" id="redSatMin" min="0" max="100" value="40">
+          </div>
+          <div class="slider-container">
+            <label>Val min <span id="redValMinVal">40</span>%</label>
+            <input type="range" id="redValMin" min="0" max="100" value="40">
+          </div>
+          <div class="slider-container">
+            <label>Píxeles mín. LED <span id="redPixMinVal">4</span></label>
+            <input type="range" id="redPixMin" min="1" max="30" value="4">
+          </div>
+        </div>
+
+        <!-- VERDE -->
+        <div style="color:#66ff66; margin-top:8px;">🟢 VERDE</div>
+        <div class="range-group">
+          <div class="slider-container">
+            <label>Hue min <span id="greenHueMinVal">50</span>° | Hue max <span id="greenHueMaxVal">80</span>°</label>
+            <div style="display:flex; gap:8px;">
+              <input type="range" id="greenHueMin" min="0" max="180" value="50" style="flex:1;">
+              <input type="range" id="greenHueMax" min="0" max="180" value="80" style="flex:1;">
+            </div>
+          </div>
+          <div class="slider-container">
+            <label>Sat min <span id="greenSatMinVal">40</span>%</label>
+            <input type="range" id="greenSatMin" min="0" max="100" value="40">
+          </div>
+          <div class="slider-container">
+            <label>Val min <span id="greenValMinVal">40</span>%</label>
+            <input type="range" id="greenValMin" min="0" max="100" value="40">
+          </div>
+          <div class="slider-container">
+            <label>Píxeles mín. LED <span id="greenPixMinVal">4</span></label>
+            <input type="range" id="greenPixMin" min="1" max="30" value="4">
+          </div>
+        </div>
+
+        <!-- AZUL -->
+        <div style="color:#88aaff; margin-top:8px;">🔵 AZUL</div>
+        <div class="range-group">
+          <div class="slider-container">
+            <label>Hue min <span id="blueHueMinVal">100</span>° | Hue max <span id="blueHueMaxVal">130</span>°</label>
+            <div style="display:flex; gap:8px;">
+              <input type="range" id="blueHueMin" min="0" max="180" value="100" style="flex:1;">
+              <input type="range" id="blueHueMax" min="0" max="180" value="130" style="flex:1;">
+            </div>
+          </div>
+          <div class="slider-container">
+            <label>Sat min <span id="blueSatMinVal">40</span>%</label>
+            <input type="range" id="blueSatMin" min="0" max="100" value="40">
+          </div>
+          <div class="slider-container">
+            <label>Val min <span id="blueValMinVal">40</span>%</label>
+            <input type="range" id="blueValMin" min="0" max="100" value="40">
+          </div>
+          <div class="slider-container">
+            <label>Píxeles mín. LED <span id="bluePixMinVal">4</span></label>
+            <input type="range" id="bluePixMin" min="1" max="30" value="4">
+          </div>
+        </div>
+        
+        <button class="btn" onclick="enviarCalibracion()" style="width:100%; margin-top:8px;">📤 Enviar calibración a cámara</button>
+      </div>
+
+      <!-- Parámetros de guiado -->
+      <div class="card">
+        <h3>Parámetros de Guiado</h3>
+        <div class="slider-container">
+          <label>Vel. avance <span id="fwdVal">0.12</span></label>
+          <input type="range" id="forwardSpeed" min="0.05" max="0.3" step="0.01" value="0.12">
+        </div>
+        <div class="slider-container">
+          <label>Vel. giro <span id="turnVal">0.8</span></label>
+          <input type="range" id="turnSpeed" min="0.3" max="1.5" step="0.1" value="0.8">
+        </div>
+        <div class="slider-container">
+          <label>Amplitud rodeo <span id="ampVal">1.0</span></label>
+          <input type="range" id="rodeoAmp" min="0.3" max="2.0" step="0.1" value="1.0">
+        </div>
+        <div class="slider-container">
+          <label>Balance motor <span id="balVal">1.0</span> (&gt;1 derecha +fuerte)</label>
+          <input type="range" id="motorBalance" min="0.7" max="1.3" step="0.01" value="1.0">
+        </div>
+        <button class="btn" onclick="enviarParams()" style="width:100%; margin-bottom:6px;">📤 Enviar parámetros</button>
+        <button class="btn" id="btnAutoToggle" onclick="toggleAuto()" style="width:100%;">🤖 Activar Guiado</button>
+        <div id="guidanceState" class="status-text" style="font-size:0.7rem;">Inactivo</div>
+      </div>
+
+      <!-- Telemetría -->
+      <div class="card">
+        <h3>Telemetría</h3>
+        <button class="btn" id="btnCamToggle" onclick="toggleCamera()" style="width:100%; margin-bottom:6px; background:#222; color:#0f0;">📷 Apagar Cámara</button>
+        <div style="font-size:0.75rem; display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+          <div>FPS: <b id="fpsVal">0</b></div>
+          <div>Batería 1: <b id="bat1Val">--</b></div>
+          <div>Batería 2: <b id="bat2Val">--</b></div>
+        </div>
+      </div>
+
+      <!-- Chasis (manual) -->
+      <div class="card">
+        <h3>Chasis</h3>
+        <div class="dir-buttons">
+          <button class="btn dir-up"    onmousedown="sendVel(-0.5,0)" onmouseup="sendVel(0,0)" onmouseleave="sendVel(0,0)">▲</button>
+          <button class="btn dir-left"  onmousedown="sendVel(0,1.5)"  onmouseup="sendVel(0,0)" onmouseleave="sendVel(0,0)">◀</button>
+          <button class="btn dir-stop"  onclick="stopCar()" style="background:#411;">⏹️</button>
+          <button class="btn dir-right" onmousedown="sendVel(0,-1.5)" onmouseup="sendVel(0,0)" onmouseleave="sendVel(0,0)">▶</button>
+          <button class="btn dir-down"  onmousedown="sendVel(0.5,0)"  onmouseup="sendVel(0,0)" onmouseleave="sendVel(0,0)">▼</button>
+        </div>
+        <div style="margin-top: 6px; display: flex; gap: 4px;">
+          <button class="btn" onclick="startSearch()" style="flex:1;">🔍 Buscar (giro lento)</button>
+          <button class="btn" onclick="stopCar()" style="flex:1;">⏹ Detener</button>
+        </div>
+        <div id="carState" style="font-size:0.7rem; margin-top: 4px;">-</div>
+      </div>
+
+      <!-- Brazo -->
+      <div class="card">
+        <h3>Brazo Robot</h3>
+        <div style="display:flex; gap:4px; margin-bottom:4px;">
+          <button class="btn" onclick="sendHome()" style="flex:1;">🏠 Home</button>
+          <button class="btn" onclick="sendRecoger()" style="flex:1;">📥 Recoger</button>
+        </div>
+        <div style="font-size:0.7rem; display:grid; grid-template-columns:auto 1fr; gap:4px; align-items:center;">
+          <span>Base</span>
+          <div style="display:flex; gap:2px;">
+            <button class="btn" onclick="moveServo('base','+')">+</button>
+            <button class="btn" onclick="moveServo('base','-')">-</button>
+          </div>
+          <span>Hombro</span>
+          <div style="display:flex; gap:2px;">
+            <button class="btn" onclick="moveServo('hombro','+')">+</button>
+            <button class="btn" onclick="moveServo('hombro','-')">-</button>
+          </div>
+          <span>Codo</span>
+          <div style="display:flex; gap:2px;">
+            <button class="btn" onclick="moveServo('codo','+')">+</button>
+            <button class="btn" onclick="moveServo('codo','-')">-</button>
+          </div>
+          <span>Grip (reserv.)</span>
+          <div style="display:flex; gap:2px;">
+            <button class="btn" onclick="moveServo('grip','+')">+</button>
+            <button class="btn" onclick="moveServo('grip','-')">-</button>
+          </div>
+        </div>
+        <div class="switch-container" style="margin-top:6px;">
+          <label for="chkLevelArm">🔧 Mantener garra nivelada (modo virtual)</label>
+          <input type="checkbox" id="chkLevelArm" onchange="handleLevelArmChange()">
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Gemelo Virtual -->
+    <div class="gemelo-panel" id="gemeloContainer">
+      <div class="gemelo-controls">
+        <label>Escala Mov: <input type="range" id="moveScale" min="0.1" max="2.0" step="0.1" value="1.0" style="width:80px;"> <span id="moveScaleVal">1.0</span></label>
+        <label>Escala Giro: <input type="range" id="rotScale" min="0.1" max="2.0" step="0.1" value="1.0" style="width:80px;"> <span id="rotScaleVal">1.0</span></label>
+      </div>
+    </div>
+
+    <canvas id="analysisCanvas" style="display:none;"></canvas>
+
   </div>
 
-  <!-- Brazo -->
-  <div class="panel">
-    <h3>🦾 Brazo</h3>
-    <button onclick="sendArm('inicio')">Posición Inicial</button>
-    <button onclick="sendArm('rombo')">Dibujar Rombo</button>
-    <button onclick="sendArm('stop')">Detener</button>
-    <p>Estado brazo: <span id="armState">-</span></p>
-  </div>
-</div>
+  <!-- ================== SCRIPT DE CONTROL Y GUIADO ================== -->
+  <script>
+    // ========== CONFIGURACIÓN ==========
+    const prefix = "UDFJC/emb1/robot0";
+    let ws = null;
 
-<script>
-  let ws = null;
-  const btnConnect = document.getElementById("btnConnect");
-  const btnDisconnect = document.getElementById("btnDisconnect");
-  const connStatus = document.getElementById("connStatus");
-  const carStateSpan = document.getElementById("carState");
-  const armStateSpan = document.getElementById("armState");
+    const canvas = document.getElementById("camCanvas");
+    const ctx = canvas.getContext("2d");
+    const analysisCanvas = document.getElementById("analysisCanvas");
+    const analysisCtx = analysisCanvas.getContext("2d");
+    const ledsContainer = document.getElementById("ledsContainer");
+    const chkDebug = document.getElementById("chkDebug");
+    
+    const netStatusDot = document.getElementById("netStatusDot");
+    const netStatusText = document.getElementById("netStatusText");
+    const btnConnect = document.getElementById("btnConnect");
 
-  class PubSub {
-    constructor() { this.subs = {}; this.prefix = "UDFJC/emb1/robot0"; }
-    subscribe(pattern, cb) {
-      if (!this.subs[pattern]) this.subs[pattern] = [];
-      this.subs[pattern].push(cb);
-    }
-    publish(topic, message) {
-      for (const p in this.subs) {
-        if (this._match(p, topic)) this.subs[p].forEach(cb => cb(topic, message));
-      }
-    }
-    _match(pattern, topic) {
-      const p = pattern.split('/'), t = topic.split('/');
-      for (let i = 0; i < p.length; i++) {
-        if (p[i] === '#') return true;
-        if (p[i] === '+') { if (i >= t.length) return false; continue; }
-        if (i >= t.length || p[i] !== t[i]) return false;
-      }
-      return p.length === t.length;
-    }
-    pub(topic, data) {
-      this.publish(topic, data);
-      if (ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ action: "PUB", topic, data }));
-    }
-    sub(topic, cb) {
-      this.subscribe(topic, cb);
-      if (ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ action: "SUB", topic }));
-    }
-    pub_pre(suffix, data) {
-      this.pub(this.prefix + "/" + suffix, data);
-    }
-    sub_pre(suffix, cb) {
-      this.sub(this.prefix + "/" + suffix, cb);
-    }
-  }
-
-  const bus = new PubSub();
-  const robotIdInput = document.getElementById("robotId");
-  robotIdInput.addEventListener("input", () => {
-    bus.prefix = `UDFJC/emb1/robot${robotIdInput.value}`;
-  });
-
-  // Conexión
-  btnConnect.onclick = () => {
-    const url = `ws://${document.getElementById("ip").value}:${document.getElementById("port").value}/ws`;
-    ws = new WebSocket(url);
-    ws.onopen = () => {
-      connStatus.textContent = "Conectado";
-      connStatus.className = "online";
-      btnConnect.disabled = true;
-      btnDisconnect.disabled = false;
-      // Reenviar suscripciones
-      for (const p in bus.subs) {
-        ws.send(JSON.stringify({ action: "SUB", topic: p }));
-      }
+    // Rangos de color
+    const colorRanges = {
+      red:   { hueMin: 0, hueMax: 10, satMin: 40, valMin: 40, pixMin: 4 },
+      green: { hueMin: 50, hueMax: 80, satMin: 40, valMin: 40, pixMin: 4 },
+      blue:  { hueMin: 100, hueMax: 130, satMin: 40, valMin: 40, pixMin: 4 }
     };
-    ws.onclose = () => {
-      connStatus.textContent = "Desconectado";
-      connStatus.className = "offline";
-      btnConnect.disabled = false;
-      btnDisconnect.disabled = true;
+
+    // Sliders de calibración
+    const slidersMap = {
+      redHueMin:   { color:'red',   prop:'hueMin' },
+      redHueMax:   { color:'red',   prop:'hueMax' },
+      redSatMin:   { color:'red',   prop:'satMin' },
+      redValMin:   { color:'red',   prop:'valMin' },
+      redPixMin:   { color:'red',   prop:'pixMin' },
+      greenHueMin: { color:'green', prop:'hueMin' },
+      greenHueMax: { color:'green', prop:'hueMax' },
+      greenSatMin: { color:'green', prop:'satMin' },
+      greenValMin: { color:'green', prop:'valMin' },
+      greenPixMin: { color:'green', prop:'pixMin' },
+      blueHueMin:  { color:'blue',  prop:'hueMin' },
+      blueHueMax:  { color:'blue',  prop:'hueMax' },
+      blueSatMin:  { color:'blue',  prop:'satMin' },
+      blueValMin:  { color:'blue',  prop:'valMin' },
+      bluePixMin:  { color:'blue',  prop:'pixMin' }
     };
-    ws.onmessage = (ev) => {
+
+    Object.entries(slidersMap).forEach(([id, mapping]) => {
+      const slider = document.getElementById(id);
+      if (slider) {
+        slider.addEventListener('input', () => {
+          const val = parseInt(slider.value);
+          document.getElementById(id + 'Val').textContent = val;
+          colorRanges[mapping.color][mapping.prop] = val;
+        });
+      }
+    });
+
+    // Estados globales
+    let autoMode = false;
+    let camEnabled = true;
+    let searching = false;
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+
+    // Visión actual
+    let localVision = {
+      redPixels: 0, greenPixels: 0, bluePixels: 0,
+      redCenter: null, greenCenter: null, blueCenter: null,
+      command: "search", detail: ""
+    };
+
+    // Memoria del último lado visto
+    const lastSeenSide = { red: null, green: null, blue: null };
+
+    // ========== CONVERSIÓN RGB A HSV ==========
+    function rgbToHsv(r, g, b) {
+      let rNorm = r / 255, gNorm = g / 255, bNorm = b / 255;
+      let max = Math.max(rNorm, gNorm, bNorm), min = Math.min(rNorm, gNorm, bNorm), diff = max - min;
+      let h = 0, s = 0, v = max;
+      if (diff !== 0) {
+        s = diff / max;
+        if (max === rNorm) h = (gNorm - bNorm) / diff;
+        else if (max === gNorm) h = 2 + (bNorm - rNorm) / diff;
+        else h = 4 + (rNorm - gNorm) / diff;
+        h = h * 60;
+        if (h < 0) h += 360;
+      }
+      return { h: Math.round(h / 2), s: Math.round(s * 100), v: Math.round(v * 100) };
+    }
+
+    function detectColorByRange(h, s, v, ranges) {
+      if (s >= ranges.red.satMin && v >= ranges.red.valMin && 
+          h >= ranges.red.hueMin && h <= ranges.red.hueMax) return 'red';
+      if (s >= ranges.green.satMin && v >= ranges.green.valMin && 
+          h >= ranges.green.hueMin && h <= ranges.green.hueMax) return 'green';
+      if (s >= ranges.blue.satMin && v >= ranges.blue.valMin && 
+          h >= ranges.blue.hueMin && h <= ranges.blue.hueMax) return 'blue';
+      return null;
+    }
+
+    // ========== PROCESAMIENTO DE FRAME (solo para visualización) ==========
+    function analyzeFrame() {
+      const w = canvas.width, h = canvas.height;
+      if (w === 0 || h === 0) return;
+
+      analysisCanvas.width = w; analysisCanvas.height = h;
+      analysisCtx.drawImage(canvas, 0, 0);
+      const imgData = analysisCtx.getImageData(0, 0, w, h);
+      const frameData = imgData.data;
+
+      const colRed = new Array(w).fill(0), colGreen = new Array(w).fill(0), colBlue = new Array(w).fill(0);
+      let totalRed = 0, totalGreen = 0, totalBlue = 0;
+      const totalPixels = w * h;
+
+      // Barra LED
+      const ledsHtml = [];
+      const ledStep = Math.max(1, Math.floor(w / 20));
+      for (let x = 0; x < w; x += ledStep) {
+        let countR = 0, countG = 0, countB = 0;
+        for (let y = 0; y < h; y++) {
+          const idx = (y * w + x) * 4;
+          const r = frameData[idx], g = frameData[idx+1], b = frameData[idx+2];
+          const hsv = rgbToHsv(r, g, b);
+          const col = detectColorByRange(hsv.h, hsv.s, hsv.v, colorRanges);
+          if (col === 'red') countR++;
+          else if (col === 'green') countG++;
+          else if (col === 'blue') countB++;
+        }
+        let ledColor = '#1a1a2e';
+        if (countR >= colorRanges.red.pixMin) ledColor = '#ff0000';
+        else if (countG >= colorRanges.green.pixMin) ledColor = '#00ff00';
+        else if (countB >= colorRanges.blue.pixMin) ledColor = '#0088ff';
+        ledsHtml.push(`<div style="flex:1; background-color:${ledColor}; border-radius:2px;"></div>`);
+      }
+      ledsContainer.innerHTML = ledsHtml.join('');
+
+      // Análisis píxel a píxel
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = (y * w + x) * 4;
+          const r = frameData[idx], g = frameData[idx+1], b = frameData[idx+2];
+          const hsv = rgbToHsv(r, g, b);
+          const detected = detectColorByRange(hsv.h, hsv.s, hsv.v, colorRanges);
+
+          if (detected === 'red') {
+            colRed[x]++; totalRed++;
+            if (chkDebug.checked) { frameData[idx]=255; frameData[idx+1]=60; frameData[idx+2]=60; }
+          } else if (detected === 'green') {
+            colGreen[x]++; totalGreen++;
+            if (chkDebug.checked) { frameData[idx]=60; frameData[idx+1]=255; frameData[idx+2]=60; }
+          } else if (detected === 'blue') {
+            colBlue[x]++; totalBlue++;
+            if (chkDebug.checked) { frameData[idx]=60; frameData[idx+1]=100; frameData[idx+2]=255; }
+          } else if (chkDebug.checked) {
+            const gray = Math.round((r+g+b)/3) * 0.25;
+            frameData[idx]=gray; frameData[idx+1]=gray; frameData[idx+2]=gray;
+          }
+        }
+      }
+
+      // Regiones y centros (para indicadores)
+      function bestRegion(colCount) {
+        let best = null, bestWidth = 0, inReg = false, start = 0;
+        for (let x = 0; x < w; x++) {
+          if (colCount[x] >= 4) {
+            if (!inReg) { inReg = true; start = x; }
+          } else {
+            if (inReg) {
+              inReg = false;
+              const width = x - start;
+              if (width >= 2 && width > bestWidth) {
+                bestWidth = width; best = { start, end: x-1 };
+              }
+            }
+          }
+        }
+        if (inReg) {
+          const width = w - start;
+          if (width >= 2 && width > bestWidth) {
+            best = { start, end: w-1 };
+          }
+        }
+        return best;
+      }
+
+      const redReg   = bestRegion(colRed);
+      const greenReg = bestRegion(colGreen);
+      const blueReg  = bestRegion(colBlue);
+
+      const redCenter   = redReg ? (redReg.start + redReg.end) / 2 : null;
+      const greenCenter = greenReg ? (greenReg.start + greenReg.end) / 2 : null;
+      const blueCenter  = blueReg ? (blueReg.start + blueReg.end) / 2 : null;
+
+      // Actualizar memoria de última posición
+      function updateMemory(color, center, w) {
+        if (center !== null) {
+          if (center < w / 3) lastSeenSide[color] = 'left';
+          else if (center > 2 * w / 3) lastSeenSide[color] = 'right';
+          else lastSeenSide[color] = 'center';
+        }
+      }
+
+      updateMemory('red', redCenter, w);
+      updateMemory('green', greenCenter, w);
+      updateMemory('blue', blueCenter, w);
+
+      // Indicadores visuales
+      function getDirection(center, w) {
+        if (center === null) return 'none';
+        if (center < w / 3) return 'left';
+        if (center > 2 * w / 3) return 'right';
+        return 'center';
+      }
+
+      const dirRed   = getDirection(redCenter, w);
+      const dirGreen = getDirection(greenCenter, w);
+      const dirBlue  = getDirection(blueCenter, w);
+
+      const arrowMap = { left: '←', center: '●', right: '→', none: '?' };
+      document.getElementById("arrowRed").textContent   = arrowMap[dirRed];
+      document.getElementById("arrowGreen").textContent = arrowMap[dirGreen];
+      document.getElementById("arrowBlue").textContent  = arrowMap[dirBlue];
+
+      function memoryText(color) {
+        if (dirRed !== 'none' && color === 'red') return '';
+        if (dirGreen !== 'none' && color === 'green') return '';
+        if (dirBlue !== 'none' && color === 'blue') return '';
+        if (lastSeenSide[color] === 'left') return '← última vez';
+        if (lastSeenSide[color] === 'right') return '→ última vez';
+        return '';
+      }
+
+      document.getElementById("memRed").textContent   = dirRed === 'none' ? memoryText('red') : '';
+      document.getElementById("memGreen").textContent = dirGreen === 'none' ? memoryText('green') : '';
+      document.getElementById("memBlue").textContent  = dirBlue === 'none' ? memoryText('blue') : '';
+
+      // Porcentajes y distancia
+      document.getElementById("redPercent").textContent   = totalPixels ? ((totalRed   / totalPixels) * 100).toFixed(1) : 0;
+      document.getElementById("greenPercent").textContent = totalPixels ? ((totalGreen / totalPixels) * 100).toFixed(1) : 0;
+      document.getElementById("bluePercent").textContent  = totalPixels ? ((totalBlue  / totalPixels) * 100).toFixed(1) : 0;
+      
+      let dominant = "Ninguno";
+      if (totalRed > totalGreen && totalRed > totalBlue && totalRed > 50) dominant = "🔴 ROJO";
+      else if (totalGreen > totalRed && totalGreen > totalBlue && totalGreen > 50) dominant = "🟢 VERDE";
+      else if (totalBlue > totalRed && totalBlue > totalGreen && totalBlue > 50) dominant = "🔵 AZUL";
+      else if (totalRed+totalGreen+totalBlue > 100) dominant = "🎨 Múltiples";
+      document.getElementById("detectedColor").textContent = dominant;
+
+      const distBlue = totalBlue > 10 ? (277 / Math.sqrt(totalBlue)).toFixed(1) : null;
+      document.getElementById("distBlue").textContent = distBlue ? `${distBlue} cm` : "-- cm";
+
+      if (chkDebug.checked) ctx.putImageData(imgData, 0, 0);
+
+      // Guardar en localVision (solo para referencia, ya no guía el robot)
+      localVision = {
+        redPixels: totalRed, greenPixels: totalGreen, bluePixels: totalBlue,
+        redCenter, greenCenter, blueCenter
+      };
+    }
+
+    // ========== WEBSOCKET ==========
+    function subscribeAll() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ["camera/frame","battery/state","battery2/state","arm/state","car/state","car/pose"].forEach(t => {
+        ws.send(JSON.stringify({ action: "SUB", topic: prefix + "/" + t }));
+      });
+    }
+
+    function toggleConnect() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close();
+      } else {
+        const host = document.getElementById("txtHost").value, port = document.getElementById("txtPort").value;
+        ws = new WebSocket(`ws://${host}:${port}/ws`);
+        ws.onopen = () => {
+          netStatusText.textContent = "Conectado"; netStatusDot.style.background = "#00ff00";
+          btnConnect.textContent = "Desconectar"; btnConnect.style.background = "#8d1a1a";
+          subscribeAll();
+        };
+        ws.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg.action === "PUB") {
+              const t = msg.topic, d = msg.data;
+              if (t.endsWith("camera/frame")) drawFrame(d);
+              else if (t.endsWith("battery/state")) document.getElementById("bat1Val").textContent = d.voltage + "V (" + d.percent + "%)";
+              else if (t.endsWith("battery2/state")) document.getElementById("bat2Val").textContent = d.voltage + "V";
+              else if (t.endsWith("car/state")) document.getElementById("carState").textContent = d.moving ? `Moviendo v=${d.v?.toFixed(2)||0} w=${d.w?.toFixed(2)||0}` : "Detenido";
+              else if (t.endsWith("car/pose")) {
+                const moveScale = parseFloat(document.getElementById("moveScale").value);
+                const rotScale  = parseFloat(document.getElementById("rotScale").value);
+                window.dispatchEvent(new CustomEvent("carPose", { detail: {
+                  x: d.x * moveScale,
+                  y: d.y * moveScale,
+                  theta: d.theta * rotScale
+                }}));
+              }
+              else if (t.endsWith("arm/state")) {
+                window.dispatchEvent(new CustomEvent("armPose", { detail: d }));
+              }
+            }
+          } catch(e) {}
+        };
+        ws.onclose = () => {
+          netStatusText.textContent = "Desconectado"; netStatusDot.style.background = "#ff3333";
+          btnConnect.textContent = "Conectar"; btnConnect.style.background = "#1a4d1a";
+          ws = null;
+        };
+      }
+    }
+
+    function drawFrame(data) {
+      const w = data.w, h = data.h;
+      if (!w || !h) return;
+      if (canvas.width !== w) { canvas.width = w; canvas.height = h; }
       try {
-        const msg = JSON.parse(ev.data);
-        if (msg.action === "PUB") bus.publish(msg.topic, msg.data);
-      } catch (e) {}
+        const binary = atob(data.frame);
+        const img = ctx.createImageData(w, h);
+        const pix = img.data;
+        for (let i = 0; i < binary.length; i += 2) {
+          const rgb565 = (binary.charCodeAt(i) << 8) | binary.charCodeAt(i+1);
+          const r = (rgb565 >> 11) & 0x1F, g = (rgb565 >> 5) & 0x3F, b = rgb565 & 0x1F;
+          const idx = (i/2) * 4;
+          pix[idx] = (r * 255) / 31; pix[idx+1] = (g * 255) / 63; pix[idx+2] = (b * 255) / 31; pix[idx+3] = 255;
+        }
+        ctx.putImageData(img, 0, 0);
+        analyzeFrame();
+        frameCount++;
+        const now = performance.now();
+        if (now - lastFpsTime >= 1000) {
+          document.getElementById("fpsVal").textContent = frameCount;
+          frameCount = 0; lastFpsTime = now;
+        }
+      } catch(e) {}
+    }
+
+    function sendCmd(topic, data) {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action:"PUB", topic: prefix+"/"+topic, data }));
+    }
+
+    // ========== FUNCIONES DE CONTROL ==========
+    window.moveServo = (servo, dir) => {
+      sendCmd("arm/cmd", { action:"move_servo", servo: servo, direction: dir });
     };
-  };
-  btnDisconnect.onclick = () => { if (ws) ws.close(); };
+    window.sendHome   = () => sendCmd("arm/cmd", { action:"home" });
+    window.sendRecoger= () => sendCmd("arm/cmd", { action:"recoger" });
+    window.sendVel    = (v, w) => sendCmd("car/cmd", { action:"set_velocity", v, w });
+    window.stopCar    = () => { sendCmd("car/cmd", { action:"stop" }); };
+    window.startSearch= () => { sendCmd("car/cmd", { action:"spin_left" }); };
 
-  // Suscripciones a estados
-  bus.sub_pre("arm/state", (topic, data) => {
-    armStateSpan.textContent = data.busy ? "Ocupado" : `Ángulos: ${data.base}°/${data.hombro}°/${data.codo}°`;
-  });
-  bus.sub_pre("car/state", (topic, data) => {
-    carStateSpan.textContent = data.moving ? `Moviendo: ${data.direction}` : "Detenido";
-  });
+    // Enviar calibración a la cámara
+    window.enviarCalibracion = () => {
+      const payload = { action: "set_thresholds", thresholds: colorRanges };
+      sendCmd("camera/cmd", payload);
+    };
 
-  // Funciones de envío
-  function sendCar(action) {
-    const col = document.getElementById("colorSelect").value;
-    bus.pub_pre("car/cmd", { action, col });
-  }
-  function sendArm(action) {
-    if (action === "inicio") bus.pub_pre("arm/cmd", { action: "inicio" });
-    else if (action === "rombo") bus.pub_pre("arm/cmd", { action: "rombo", size: 20 });
-    // stop no está implementado en el brazo, pero podrías añadirlo
-  }
-</script>
+    // Enviar parámetros de guiado al carro
+    window.enviarParams = () => {
+      const fwd = parseFloat(document.getElementById("forwardSpeed").value);
+      const turn = parseFloat(document.getElementById("turnSpeed").value);
+      const amp = parseFloat(document.getElementById("rodeoAmp").value);
+      const bal = parseFloat(document.getElementById("motorBalance").value);
+      sendCmd("guidance/cmd", {
+        action: "set_params",
+        forward: fwd,
+        turn: turn,
+        amp: amp,
+        balance: bal
+      });
+    };
+
+    // Activar/desactivar guiado automático
+    window.toggleAuto = () => {
+      autoMode = !autoMode;
+      sendCmd("guidance/cmd", { action: "auto", enable: autoMode });
+      document.getElementById("btnAutoToggle").textContent = autoMode ? "Desactivar Guiado" : "Activar Guiado";
+      document.getElementById("guidanceState").textContent = autoMode ? "Activo" : "Inactivo";
+    };
+
+    window.toggleCamera = () => {
+      camEnabled = !camEnabled;
+      const btn = document.getElementById("btnCamToggle");
+      btn.textContent = camEnabled ? "📷 Apagar Cámara" : "📷 Encender Cámara";
+      btn.style.background = camEnabled ? "#222" : "#f0f";
+      btn.style.color = camEnabled ? "#0f0" : "#000";
+      sendCmd("camera/cmd", { action:"toggle", state:camEnabled });
+    };
+
+    // Sensibilidad gemelo
+    document.getElementById("moveScale").addEventListener("input", function() {
+      document.getElementById("moveScaleVal").textContent = parseFloat(this.value).toFixed(1);
+    });
+    document.getElementById("rotScale").addEventListener("input", function() {
+      document.getElementById("rotScaleVal").textContent = parseFloat(this.value).toFixed(1);
+    });
+
+    // Actualizar valores mostrados de sliders de guiado
+    document.getElementById("forwardSpeed").addEventListener("input", function() {
+      document.getElementById("fwdVal").textContent = parseFloat(this.value).toFixed(2);
+    });
+    document.getElementById("turnSpeed").addEventListener("input", function() {
+      document.getElementById("turnVal").textContent = parseFloat(this.value).toFixed(1);
+    });
+    document.getElementById("rodeoAmp").addEventListener("input", function() {
+      document.getElementById("ampVal").textContent = parseFloat(this.value).toFixed(1);
+    });
+    document.getElementById("motorBalance").addEventListener("input", function() {
+      document.getElementById("balVal").textContent = parseFloat(this.value).toFixed(2);
+    });
+
+    setTimeout(() => { if (ws === null) toggleConnect(); }, 500);
+  </script>
+
+  <!-- ================== GEMELO 3D (sin cambios) ================== -->
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.128.0/build/three.module.js" } }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'https://unpkg.com/three@0.128.0/examples/jsm/controls/OrbitControls.js';
+
+    let keepLevel = false;
+    let currentArm = { base: 90, hombro: 90, codo: 180 };
+    let virtualRobot;
+
+    const gemeloContainer = document.getElementById("gemeloContainer");
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111122);
+    scene.fog = new THREE.FogExp2(0x111122, 0.008);
+    const camera3D = new THREE.PerspectiveCamera(45, gemeloContainer.clientWidth / gemeloContainer.clientHeight, 0.1, 1000);
+    camera3D.position.set(5, 4, 6);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(gemeloContainer.clientWidth, gemeloContainer.clientHeight);
+    renderer.shadowMap.enabled = true;
+    gemeloContainer.appendChild(renderer.domElement);
+    const controls = new OrbitControls(camera3D, renderer.domElement);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.AmbientLight(0x404060));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(3, 5, 2); dirLight.castShadow = true;
+    scene.add(dirLight);
+    scene.add(new THREE.PointLight(0x4466cc, 0.3, 10, 2));
+    scene.add(new THREE.GridHelper(20, 20, 0x88aaff, 0x335588));
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.8 }));
+    floor.rotation.x = -Math.PI/2; floor.position.y = -0.2; floor.receiveShadow = true;
+    scene.add(floor);
+
+    class VirtualRobot {
+      constructor(scene) {
+        this.group = new THREE.Group(); scene.add(this.group);
+        const chassisGeo = new THREE.BoxGeometry(1.2, 0.3, 1.8);
+        this.chassis = new THREE.Mesh(chassisGeo, new THREE.MeshStandardMaterial({ color: 0x3a86ff }));
+        this.chassis.castShadow = this.chassis.receiveShadow = true;
+        this.chassis.position.y = 0; this.group.add(this.chassis);
+        const wheelGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.4, 24);
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        [[-0.6, -0.1, 0.8], [0.6, -0.1, 0.8], [-0.6, -0.1, -0.8], [0.6, -0.1, -0.8]].forEach(pos => {
+          const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+          wheel.rotation.z = Math.PI/2; wheel.position.set(pos[0], pos[1], pos[2]);
+          wheel.castShadow = true; this.group.add(wheel);
+        });
+        const jointMat = new THREE.MeshStandardMaterial({ color: 0xff4757, roughness: 0.2 });
+        const shoulderBase = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.15, 16), new THREE.MeshStandardMaterial({ color: 0x2f3542 }));
+        shoulderBase.position.set(0, 0.225, 0.6); shoulderBase.castShadow = true; this.group.add(shoulderBase);
+        this.baseRotGroup = new THREE.Group(); this.baseRotGroup.position.set(0, 0.075, 0); shoulderBase.add(this.baseRotGroup);
+        const shoulderJointGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.35, 16);
+        shoulderJointGeo.rotateZ(Math.PI/2); this.baseRotGroup.add(new THREE.Mesh(shoulderJointGeo, jointMat));
+        this.shoulder = new THREE.Group(); this.baseRotGroup.add(this.shoulder);
+        const shoulderLinkLength = 0.8;
+        const shoulderLinkGeo = new THREE.BoxGeometry(0.15, shoulderLinkLength, 0.15);
+        const shoulderLinkMesh = new THREE.Mesh(shoulderLinkGeo, new THREE.MeshStandardMaterial({ color: 0xe94560 }));
+        shoulderLinkMesh.position.set(0, shoulderLinkLength/2, 0); shoulderLinkMesh.castShadow = true; this.shoulder.add(shoulderLinkMesh);
+        this.elbowPivot = new THREE.Group(); this.elbowPivot.position.set(0, shoulderLinkLength, 0); this.shoulder.add(this.elbowPivot);
+        const elbowJointGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.28, 16);
+        elbowJointGeo.rotateZ(Math.PI/2); this.elbowPivot.add(new THREE.Mesh(elbowJointGeo, jointMat));
+        this.elbowGroup = new THREE.Group(); this.elbowPivot.add(this.elbowGroup);
+        const elbowLinkLength = 0.8;
+        const elbowLinkGeo = new THREE.BoxGeometry(0.12, 0.12, elbowLinkLength);
+        const elbowLinkMesh = new THREE.Mesh(elbowLinkGeo, new THREE.MeshStandardMaterial({ color: 0x1e3799 }));
+        elbowLinkMesh.position.set(0, 0, elbowLinkLength/2); elbowLinkMesh.castShadow = true; this.elbowGroup.add(elbowLinkMesh);
+        this.gripper = new THREE.Group();
+        this.gripper.position.set(0, 0, elbowLinkLength);
+        this.elbowGroup.add(this.gripper);
+        const gripperBase = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.05), new THREE.MeshStandardMaterial({ color: 0xa5b1c2 }));
+        gripperBase.castShadow = true; this.gripper.add(gripperBase);
+        const fingerGeo = new THREE.BoxGeometry(0.03, 0.06, 0.14);
+        const fingerMat = new THREE.MeshStandardMaterial({ color: 0xf7b731 });
+        const lf = new THREE.Mesh(fingerGeo, fingerMat); lf.position.set(-0.07, 0, 0.07); lf.castShadow = true; this.gripper.add(lf);
+        const rf = new THREE.Mesh(fingerGeo, fingerMat); rf.position.set(0.07, 0, 0.07); rf.castShadow = true; this.gripper.add(rf);
+        this.setPose(0, 0, 0); this.setArmAngles(90, 90, 180);
+      }
+      setPose(x, y, theta) {
+        this.group.position.set(y, 0, x);
+        this.group.rotation.y = theta;
+      }
+      setArmAngles(baseDeg, hombroDeg, codoDeg, keepGripperLevel = false) {
+        currentArm.base = baseDeg;
+        currentArm.hombro = hombroDeg;
+        currentArm.codo = codoDeg;
+
+        this.baseRotGroup.rotation.y = (baseDeg - 90) * Math.PI / 180;
+        const hombroRad = (hombroDeg - 90) * Math.PI / 180;
+        this.shoulder.rotation.x = hombroRad;
+
+        let codoRelRad;
+        if (keepGripperLevel) {
+          codoRelRad = -hombroRad;
+          this.elbowGroup.rotation.x = codoRelRad;
+        } else {
+          codoRelRad = -(codoDeg - 180) * Math.PI / 180;
+          this.elbowGroup.rotation.x = codoRelRad;
+        }
+
+        if (keepGripperLevel) {
+          const worldElbow = hombroRad + codoRelRad;
+          this.gripper.rotation.x = -worldElbow;
+        } else {
+          this.gripper.rotation.x = 0;
+        }
+      }
+    }
+
+    virtualRobot = new VirtualRobot(scene);
+
+    document.getElementById("chkLevelArm").addEventListener("change", (e) => {
+      keepLevel = e.target.checked;
+      virtualRobot.setArmAngles(currentArm.base, currentArm.hombro, currentArm.codo, keepLevel);
+    });
+
+    window.addEventListener("carPose", (e) => {
+      virtualRobot.setPose(e.detail.x, e.detail.y, e.detail.theta);
+    });
+    window.addEventListener("armPose", (e) => {
+      const d = e.detail;
+      virtualRobot.setArmAngles(d.base, d.hombro, d.codo, keepLevel);
+    });
+
+    function animateGemelo() {
+      requestAnimationFrame(animateGemelo);
+      controls.update();
+      renderer.render(scene, camera3D);
+    }
+    animateGemelo();
+
+    window.addEventListener("resize", () => {
+      const w = gemeloContainer.clientWidth, h = gemeloContainer.clientHeight;
+      if (w === 0 || h === 0) return;
+      camera3D.aspect = w / h;
+      camera3D.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    });
+  </script>
 </body>
 </html>
